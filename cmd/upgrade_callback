@@ -1,0 +1,4 @@
+#!/bin/bash
+### openclaw-fnos: post-upgrade. Panel boot performs config normalization and
+### schema healing on start; no action needed here.
+exit 0

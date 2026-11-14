@@ -1,0 +1,12 @@
+appname               = openclaw-fnos
+version               = 1.0.0
+display_name          = OpenClaw
+desc                  = OpenClaw for fnOS：社区自研的 OpenClaw 管理面板（Node 运行时，无第三方面板代码）。特性：启动前 agent 数据库 schema 自动迁移与失败回滚；版本固定安装（更新走显式确认）；模型供应商管理（OpenAI 兼容接口一键拉取模型，预置 10Router）；飞书通道一键接入 claw-fry-cards 虾条卡片插件；控制台经应用网关内嵌。<br/><br/><strong>声明：</strong>本包为社区集成，与飞牛官方 trim.openclaw 相互独立，可在同一 NAS 共存（Gateway 端口 36420，官方为 36412）。OpenClaw 本身的安全性与稳定性由上游负责。
+platform              = x86
+source                = thirdparty
+maintainer            = techysy
+distributor           = techysy
+desktop_uidir         = ui
+desktop_applaunchname = openclaw-fnos.Application
+install_dep_apps      = nodejs_v24:bunjs>=1.3.9
+changelog             = 1.0.0 首个正式版本：面板前后端完全自研（Node 24 + 原生 JS，无第三方代码）；启动前 schema 自动迁移与失败回滚；版本固定安装；OpenAI 兼容模型一键拉取（10Router 预置）；飞书通道一键集成 claw-fry-cards；控制台经应用网关内嵌（HTTP + WebSocket）。

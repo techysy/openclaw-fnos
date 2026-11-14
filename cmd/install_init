@@ -1,0 +1,5 @@
+#!/bin/bash
+
+### openclaw-fnos: no action required.
+
+exit 0

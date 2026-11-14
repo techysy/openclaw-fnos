@@ -1,0 +1,3 @@
+#!/bin/bash
+### openclaw-fnos: post-uninstall. Data intentionally kept (see README).
+exit 0

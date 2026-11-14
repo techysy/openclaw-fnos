@@ -1,0 +1,167 @@
+#!/bin/bash
+#
+# openclaw-fnos: fnOS lifecycle entry point.
+#
+# The panel is a Node 24 service (node:sqlite is required for the schema
+# self-heal; Bun lacks it and also fails to read injected env on some fnOS
+# mounts). It listens on a unix socket that the fnOS unified gateway
+# forwards /app/openclaw-fnos/* to, and manages the OpenClaw gateway
+# process itself (install / start / stop / migrate).
+
+set -uo pipefail
+
+# fnOS injects these; defaults keep the script usable from a manual shell.
+TRIM_PKGVAR="${TRIM_PKGVAR:-/vol4/@appdata/openclaw-fnos}"
+TRIM_PKGHOME="${TRIM_PKGHOME:-/var/apps/openclaw-fnos/home}"
+TRIM_APPDEST="${TRIM_APPDEST:-/var/apps/openclaw-fnos/target}"
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+
+APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP_DIR="${TRIM_APPDEST:-${APP_ROOT}/target}"
+
+PANEL_ENTRY="${APP_DIR}/panel/index.js"
+PANEL_UI="${APP_DIR}/panel/ui"
+SOCKET_PATH="${TRIM_APPDEST}/app.sock"
+OPENCLAW_DATA_DIR="${TRIM_PKGHOME}/data"
+
+NODE_BIN="${OPENCLAW_NODE_BIN:-/var/apps/nodejs_v24/target/bin/node}"
+
+log_msg() {
+    mkdir -p "${TRIM_PKGVAR}" 2>/dev/null
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >>"${LOG_FILE}" 2>/dev/null || true
+}
+
+check_process() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+
+status() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid="$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')"
+        if check_process "${pid}"; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+stop_process() {
+    log_msg "Stopping panel ..."
+    if [ -f "${PID_FILE}" ]; then
+        local pid count
+        pid="$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')"
+        if check_process "${pid}"; then
+            kill -TERM "${pid}" 2>/dev/null
+            count=0
+            while check_process "${pid}" && [ ${count} -lt 15 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            check_process "${pid}" && kill -KILL "${pid}" 2>/dev/null
+        fi
+        rm -f "${PID_FILE}"
+    fi
+
+    # Sweep any leftover panel processes from earlier launches whose PID was
+    # never recorded (a historical pipe-tee bug) -- match the unique entry.
+    local leftover
+    for leftover in $(pgrep -f "openclaw-fnos/panel/index.js" 2>/dev/null); do
+        [ "${leftover}" = "$$" ] && continue
+        log_msg "sweeping leftover panel pid ${leftover}"
+        kill -TERM "${leftover}" 2>/dev/null
+    done
+    sleep 2
+    for leftover in $(pgrep -f "openclaw-fnos/panel/index.js" 2>/dev/null); do
+        [ "${leftover}" = "$$" ] && continue
+        kill -KILL "${leftover}" 2>/dev/null
+    done
+
+    # The managed gateway outlives the panel unless stopped too; a restart
+    # must not leave an orphan holding the port.
+    local gw_pid_file="${OPENCLAW_DATA_DIR}/runtime/gateway.pid" gw
+    if [ -f "${gw_pid_file}" ]; then
+        gw="$(head -n 1 "${gw_pid_file}" | tr -d '[:space:]')"
+        if check_process "${gw}"; then
+            log_msg "stopping managed gateway pid ${gw}"
+            kill -TERM "${gw}" 2>/dev/null
+            sleep 3
+            check_process "${gw}" && kill -KILL "${gw}" 2>/dev/null
+        fi
+        rm -f "${gw_pid_file}"
+    fi
+
+    rm -f "${SOCKET_PATH}" 2>/dev/null
+    return 0
+}
+
+start_process() {
+    if status; then
+        return 0
+    fi
+
+    mkdir -p "${OPENCLAW_DATA_DIR}" "${TRIM_PKGVAR}"
+
+    [ -x "${NODE_BIN}" ] || { log_msg "ERROR: node not found at ${NODE_BIN}"; return 1; }
+    [ -f "${PANEL_ENTRY}" ] || { log_msg "ERROR: panel entry missing: ${PANEL_ENTRY}"; return 1; }
+
+    # Package-declared defaults. Read in subshells so a malformed env file
+    # cannot abort the launcher under set -u.
+    local pinned_version="" tr_url="" tr_key="" tr_model=""
+    if [ -f "${APP_DIR}/panel/openclaw-version.env" ]; then
+        pinned_version="$( . "${APP_DIR}/panel/openclaw-version.env" 2>/dev/null; printf '%s' "${OPENCLAW_VERSION:-}" )"
+    fi
+    if [ -f "${APP_DIR}/panel/tenrouter.env" ]; then
+        eval "$( . "${APP_DIR}/panel/tenrouter.env" 2>/dev/null
+                  printf 'tr_url=%q tr_key=%q tr_model=%q' \
+                    "${TENROUTER_BASE_URL:-}" "${TENROUTER_API_KEY:-}" "${TENROUTER_MODEL:-}" )"
+    fi
+
+    rm -f "${SOCKET_PATH}"
+    log_msg "Starting panel (socket ${SOCKET_PATH})"
+
+    # No pipe here: `$!` must be the node PID (a `| tee` would record tee
+    # instead and stop would kill the wrong process).
+    nohup env \
+        MONITOR_SOCKET_PATH="${SOCKET_PATH}" \
+        STATIC_DIR="${PANEL_UI}" \
+        OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR}" \
+        BASE_PATH="/app/openclaw-fnos" \
+        OPENCLAW_VERSION="${pinned_version}" \
+        TENROUTER_BASE_URL="${tr_url}" \
+        TENROUTER_API_KEY="${tr_key}" \
+        TENROUTER_MODEL="${tr_model}" \
+        PANEL_DIAG_LOG="${TRIM_APPDEST}/panel-diag.log" \
+        HOME="${OPENCLAW_DATA_DIR}/home" \
+        BUN_CACHE_DIR="${OPENCLAW_DATA_DIR}/.bun-cache" \
+        XDG_CACHE_HOME="${OPENCLAW_DATA_DIR}/.cache" \
+        "${NODE_BIN}" "${PANEL_ENTRY}" >>"${TRIM_APPDEST}/panel-stdout.log" 2>&1 &
+    printf "%s" "$!" >"${PID_FILE}"
+
+    local i=0
+    while [ ${i} -lt 30 ]; do
+        if [ -S "${SOCKET_PATH}" ]; then
+            log_msg "panel is listening on ${SOCKET_PATH}"
+            return 0
+        fi
+        if ! status; then
+            log_msg "ERROR: panel exited during startup"
+            tail -n 20 "${TRIM_APPDEST}/panel-stdout.log" 2>/dev/null | while IFS= read -r l; do log_msg "  ${l}"; done
+            return 1
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+
+    log_msg "ERROR: panel socket did not appear within 30s"
+    stop_process
+    return 1
+}
+
+case "${1:-}" in
+    start) start_process ;;
+    stop) stop_process ;;
+    status) status && exit 0 || exit 3 ;;
+    *) exit 1 ;;
+esac

@@ -1,0 +1,10 @@
+# secrets: never commit real API keys
+app/panel/tenrouter.env
+
+# build artifacts
+*.fpk
+
+# runtime noise
+*.log
+node_modules/
+.DS_Store

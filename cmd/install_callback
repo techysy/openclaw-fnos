@@ -1,0 +1,4 @@
+#!/bin/bash
+### openclaw-fnos: post-install. The panel installs OpenClaw lazily on the
+### first "安装 / 修复当前版本" click; nothing heavy belongs here.
+exit 0
