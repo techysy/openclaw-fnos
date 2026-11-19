@@ -1,5 +1,9 @@
 # openclaw-fnos
 
+> **⚠️ 本项目已归档（2026-11-20）。**
+> 飞牛官方 `trim.openclaw` 已恢复更新（2026.8.35-6，自带数据迁移），请优先使用官方应用。
+> 本项目保留作为技术记录，详见 [ARCHIVE.md](./ARCHIVE.md)。
+
 **OpenClaw for fnOS** — a community-built management panel for running
 [OpenClaw](https://openclaw.ai) on fnOS NAS, with automatic database
 migration, pinned releases, 10Router model discovery, and one-click
